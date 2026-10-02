@@ -6,6 +6,7 @@ date: 2026-09-25
 due:
   - label: "Lab 5 due"
     date: 2026-10-02
+author : "Jingyi Chen"
 status: "published"
 release: "public"
 engine: julia
@@ -64,8 +65,8 @@ colors = Makie.wong_colors()
 
 ```{julia}
 #| solution: false
-station = "8638610" # update to your station
-record = load_water_level(station; cache=joinpath(here, "$station-hourly.csv"))
+station = "8670870" # update to your station
+record = load_water_level(station; name="Fort Pulaski", cache=joinpath(here, "$station-hourly.csv"))
 ```
 
 Change `station` to the gauge you used in lab 4.
@@ -131,10 +132,43 @@ With `:msl`, the lower panel is the upper panel minus the orange line, so the ye
 With `:linear`, a straight line fitted to the orange curve is subtracted instead (the line itself is not drawn), so those wiggles stay in the lower panel.
 The high readings at the top of the lower panel are what the threshold and the GPD work on.
 
+To compare the two methods directly, the next figure draws the annual means with the straight line `:linear` would fit to them.
+
+```{julia}
+#| solution: false
+#| output: true
+#| label: fig-msl-vs-linear
+#| fig-cap: "Annual mean level with a straight-line fit (top), and how far each year sits from that line (bottom). The bottom panel is what `:linear` leaves in the record and `:msl` removes."
+yrs = obsyears(annual_msl)
+means = ustrip.(baseline(annual_msl))
+X = [ones(length(yrs)) yrs]
+coef = X \ means                                                       # <1>
+resid = means .- X * coef
+
+fig2 = Figure(; size=(700, 420))
+ax_mean = Axis(fig2[1, 1]; ylabel=L"\text{annual mean (ft)}")
+ax_res = Axis(fig2[2, 1]; xlabel=L"\text{year}", ylabel=L"\text{mean} - \text{line (ft)}")
+scatterlines!(ax_mean, yrs, means; color=colors[2], markersize=5)
+lines!(ax_mean, yrs, X * coef; color=:black, linestyle=:dash)
+barplot!(ax_res, yrs, resid; color=ifelse.(resid .> 0, colors[6], colors[1]))
+hlines!(ax_res, [0]; color=:black, linewidth=0.5)
+linkxaxes!(ax_mean, ax_res)
+hidexdecorations!(ax_mean; grid=false)
+@printf("trend %.2f ft/century; departures from line: sd %.2f ft, range %.2f to %.2f ft\n",
+    100 * coef[2], std(resid), minimum(resid), maximum(resid))
+fig2
+```
+
+1. Least-squares fit of a straight line to the annual means, the same line `:linear` subtracts.
+
 **Your answer.**
 Which method did you choose for your gauge, and why?
 
-> *Answer here*
+> *I used `:msl`. A straight line through the annual means gives about 1.2 ft per century (@fig-msl-vs-linear), but the years don't scatter randomly around it.*
+> *They come in runs. Above the line in the late 1940s, mostly below it from the mid-1970s to about 2012, and above it almost every year since 2013, by up to 0.35 ft.*
+> *So sea level here has sped up recently and a straight line can't follow it.*
+> *With `:linear`, 2019 to 2024 would keep an extra 0.15 to 0.35 ft, and that goes straight into the high readings the threshold and GPD use.*
+> *`:msl` takes each year's own mean out, so that leftover goes away. The cost is that it also flattens years that really were high, like 1948, but those departures are a few tenths of a foot, small next to the ±5 ft tidal range.*
 
 
 ## Declustering
@@ -148,6 +182,7 @@ Declustering happens once, at a base threshold `u_base`, which has to lie below 
 
 ```{julia}
 #| solution: false
+#| output: true
 min_gap_hours = 72                                                     # <- your choice
 u_base = quantile(levels, 0.99)                                        # <1>
 
@@ -167,6 +202,7 @@ Depending on how you define the gap, you will get different numbers of storms:
 
 ```{julia}
 #| solution: false
+#| output: true
 for gap in (12, 24, 72, 168, 336)
     n = length(first(decluster(times, levels, u_base; min_gap_hours=gap)))
     @printf("gap %3d h: %4d storms, %5.2f per year\n", gap, n, n / n_years)
@@ -192,7 +228,13 @@ fig
 What gap did you choose, and why does it suit the storms that raise water levels at your gauge?
 Use the table: say whether the storm count levels off over some range of gaps, and where your choice falls relative to that range.
 
-> *Answer here*
+> *I kept the 72-hour gap, which gives 1140 storms, 13.3 a year, above the 5.19 ft base threshold. The short gaps split storms apart. There are two high tides a day here, so a storm that keeps the water up for a few days crosses the threshold on several high tides in a row.*
+
+> *Going from 12 to 24 hours cuts the count in half (39.7 to 20.7), and going to 72 hours cuts another third (to 13.3)From 72 to 168 hours it only drops to 12.1, about 9%, so the count mostly levels off in that range. At 336 hours it falls again, to 10.0, which looks like separate storms starting to get lumped together.*
+
+> *72 hours is at the short end of the flat range. That's about how long a tropical storm passing by, so one storm stays one event, but two storms a week apart are still counted separately.*
+
+> *The peaks plot looks reasonable with this gap. The points are spread fairly evenly across the record, most sit between 5.2 and 6.5 ft, and only a handful stand out, like the two near 8.4 and 8.9 ft around 2016 and 2017.*
 
 
 ## Threshold diagnostics
@@ -220,7 +262,7 @@ The default of 3.5 ft shown here is not necessarily a good one!
 
 ```{julia}
 #| solution: false
-threshold = 3.5                                                        # <- your choice
+threshold = 5.8                                                         # <- your choice
 threshold > u_base || error("threshold must exceed u_base, $(round(u_base; digits=2))")
 n_exceed = count(>(threshold), peaks)
 λ = n_exceed / n_years
@@ -233,7 +275,12 @@ n_exceed >= 30 || @warn "only $n_exceed storms above the threshold; try lowering
 What threshold did you choose?
 Point to what in each plot supports it, and say how many storms remain above it.
 
-> *Answer here*
+> *I chose 5.8 ft.*
+> *In the mean residual life plot, the mean excess drops steadily from 5.2 to about 5.8 ft, then stays roughly flat near 0.3 ft out to about 6.2 ft. A GPD should give a straight line above a good threshold, so 5.8 is a reasonable point to start the GPD fit. Above about 6.2 ft the line wanders upward, but the band gets very wide there because there are few storms left.*
+
+> *The stability plot never goes completely flat. The shape $\xi$ climbs from about −0.1 at 5.2 ft and is close to 0 around 5.8 ft, and above that the estimates mostly fall inside each other's bands. $\sigma^*$ keeps sliding down across the whole range, so it doesn't point to one value either way.*
+
+> *Going higher would mean fewer storms for not much gain. 5.8 ft leaves 336 storms, about 3.9 a year, while 6.2 ft would leave only 89.*
 
 
 ## The model
@@ -400,13 +447,16 @@ fig
 **Your answer.**
 How does the maximum likelihood 100-year level compare with the posterior median and the credible interval, and what in the model explains any gap?
 
-> *Answer here*
+> *The maximum likelihood 100-year level is 7.81 ft. The posterior median is 7.84 ft, with a 95% interval of [7.49, 8.49] ft, so the MLE sits well inside the interval and only 0.03 ft from the median.*
+> *They agree because the priors are weak and 336 storms is a lot of data, so the likelihood decides $\sigma$ and $\xi$.*
+
+> *The small gap is because the MLE maximizes the likelihood, while the posterior median is the middle of the posterior distribution, which is not symmetric. The interval reaches 0.65 ft above the median but only 0.35 ft below. A larger $\xi$ raises the 100-year level quickly, so the upper tail is longer.*
 
 **Your answer.**
 Is holding $\lambda$ fixed a reasonable simplification at your gauge?
 Compare the change in the 100-year level when $\lambda$ moves by one standard error, printed above, with the width of the credible interval.
 
-> *Answer here*
+> *Yes. Moving $\lambda$ by one standard error (3.91 ± 0.21 per year) only changes the 100-year level from 7.79 to 7.83 ft, a spread of 0.04 ft. The 95% credible interval is 1.00 ft wide (7.49 to 8.49 ft), so the uncertainty in $\lambda$ is about 4% (0.04/1.00) of it. Almost all of the uncertainty comes from $\sigma$ and $\xi$, not from how often storms happen.*
 
 
 ## Comparison with the GEV
@@ -421,10 +471,19 @@ annmax = AnnMaxRecord(detrended; detrend=:none, units=u"ft")
 y = ustrip.(waterlevels(annmax))
 
 gev_mle = only(getdistribution(gevfit(y)))
-fit_gev = gevfitbayes(y; rng=rng, sampler=NUTS(0.99), progress=false)
+gev_start = InitFromParams(
+    (β_location=[median(y)], β_logscale=[log(std(y))], β_shape=[0.1])
+)                                                                      # <1>
+fit_gev = gevfitbayes(
+    y; rng=rng, sampler=NUTS(0.99), progress=false,
+    initial_params=fill(gev_start, 4)
+)
 gev_draws = only.(posterior_distributions(fit_gev))
 gev_curves = [[returnlevel(d, T) for T in return_periods] for d in gev_draws]
 ```
+
+1. All four chains start near the data, like the GPD maximum likelihood fit above.
+   Left to start from the prior, one chain at this gauge got stuck at a location near 0 ft, far below every annual maximum, and the check below reported $\hat R$ = 1.6 and 595 divergences.
 
 ```{julia}
 #| solution: false
@@ -436,6 +495,10 @@ for (label, draws) in (("GPD", gpd_100), ("GEV", gev_100))
     @printf("100-year %s: %.2f ft [%.2f, %.2f]\n",
         label, median(draws), quantile(draws, 0.025), quantile(draws, 0.975))
 end
+
+@printf("GEV MLE: μ = %.3f, σ = %.3f, ξ = %.3f\n", gev_mle.μ, gev_mle.σ, gev_mle.ξ)
+
+
 ```
 
 ```{julia}
@@ -468,13 +531,22 @@ fig
 Do the two approaches agree on the 100-year level, and which interval is narrower?
 Explain the difference in width from the data each fit uses.
 
-> *Answer here*
+> *The two approaches agree on the 100-year level. The GPD gives 7.84 ft [7.49, 8.49] and the GEV gives 7.97 ft [7.50, 9.00], only 0.13 ft apart, and the intervals mostly overlap.*
+> *The GPD interval is narrower, 1.00 ft wide against 1.50 ft for the GEV.*
+
+> *That's because the GPD uses 336 storms and the GEV only 86 annual maxima. The GEV keeps one value per year, so a year with several big storms counts once, and with fewer data points it pins down $\xi$ less tightly, which widens the upper end most.*
+
+> (*P.S. As given, the GEV sampler did not converge (R̂ = 1.6, 595 divergences, one chain stuck far below the data), so I started the chains near the data in the GEV fit cell. After that, R̂ = 1.000 with no divergences.*)
 
 **Your answer.**
 Compare both with your lab 4 result.
 If they differ, say which choice made the difference.
 
-> *Answer here*
+> *In lab 4 I reported 7.94 ft [7.51, 8.71] for the 100-year level, from a GEV with the quantile prior on the same :msl annual maxima. The GEV here gives almost the same median, 7.97 ft, and the GPD comes out a bit lower at 7.84 ft. All three are within about 0.13 ft of each other.*
+
+> *The detrending isn't what changes things. Both lab 4 and lab 5 use the same 86 annual maxima, and the GEV maximum likelihood fit here gives the same $\mu$ = 6.203, $\sigma$ = 0.265, $\xi$ = 0.144 as in lab 4.*
+
+> *The differences are in the upper end of the interval. The lab 5 GEV goes up to 9.00 ft against 8.71 ft in lab 4, because the quantile prior in lab 4 told the model what return levels were plausible, while the prior here is weaker. The GPD goes up only to 8.49 ft, because it uses 336 storms instead of 86 annual maxima.*
 
 
 ## Sensitivity experiment
@@ -501,20 +573,64 @@ You can also change a prior in `gpd_excess`, which means rerunning from that cel
 The prior on $\xi$ is the one to try, since it is the one the data constrain least.
 Return the settings to your chosen values before you turn the lab in.
 
+The cell below reruns the GPD fit with `:linear` detrending and leaves every other setting as chosen, so that row of the table can be checked without changing `detrend_method` above.
+
+```{julia}
+#| solution: false
+let method = :linear
+    rec = detrend(record; method=method)
+    t_lin = obstimes(rec)
+    x_lin = ustrip.(u"ft", waterlevels(rec))
+    yrs_lin = length(unique(year.(t_lin)))
+    base_lin = quantile(x_lin, 0.99)
+    idx_lin, _ = decluster(t_lin, x_lin, base_lin; min_gap_hours=min_gap_hours)
+    pk_lin = x_lin[idx_lin]
+    exc_lin = [p - threshold for p in pk_lin if p > threshold]
+    λ_lin = length(exc_lin) / yrs_lin
+    m_lin = gpd_excess(exc_lin)
+    fit_lin = maximum_likelihood(
+        m_lin; initial_params=InitFromParams((logσ=log(mean(exc_lin)), ξ=0.1))
+    )
+    θ_lin = NamedTuple(fit_lin.params)
+    mle_lin = GeneralizedPareto(threshold, θ_lin.σ, θ_lin.ξ)
+    ch_lin = sample(
+        MersenneTwister(543), m_lin, NUTS(0.99), MCMCThreads(), 2_000, 4; progress=false
+    )                                                                  # <1>
+    check_chain(ch_lin, "GPD")
+    dr_lin = DataFrame(ch_lin)
+    l100_lin = [returnlevel(GeneralizedPareto(threshold, s, x), 100; rate=λ_lin)
+        for (s, x) in zip(dr_lin.σ, dr_lin.ξ)]
+    @printf("detrend %s, gap %d h, threshold %.2f ft, base threshold %.2f ft\n",
+        method, min_gap_hours, threshold, base_lin)
+    @printf(
+        "storms %d, λ %.2f, ξ %.3f, MLE %.2f ft, posterior %.2f ft [%.2f, %.2f]\n",
+        length(exc_lin), λ_lin, mle_lin.ξ, returnlevel(mle_lin, 100; rate=λ_lin),
+        median(l100_lin), quantile(l100_lin, 0.025), quantile(l100_lin, 0.975)
+    )
+end
+```
+
+1. A fresh generator with the lab's seed, so this row matches a full render with `detrend_method = :linear` and does not disturb `rng` for the cells below.
+
 **Your answer.**
 The last three columns are the 100-year level in feet: the maximum likelihood estimate (MLE), the posterior median, and the 95% credible interval.
 
 | Change | Storms | $\lambda$ | $\xi$ | MLE | Posterior | Interval |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| none | | | | | | |
-| | | | | | | |
-| | | | | | | |
-| | | | | | | |
+| none (`:msl`, 72 h, 5.8 ft) | 336 | 3.91 | 0.063 | 7.81 | 7.84 | [7.49, 8.49] |
+| threshold 6.0 ft; expect fewer storms, wider interval, similar level | 175 | 2.03 | 0.143 | 7.93 | 7.95 | [7.49, 8.93] |
+| threshold 5.5 ft; expect more storms, narrower interval | 675 | 7.85 | −0.052 | 7.69 | 7.72 | [7.51, 8.06] |
+| gap 24 h; expect almost no change | 339 | 3.94 | 0.065 | 7.81 | 7.85 | [7.50, 8.55] |
+| gap 168 h; expect almost no change | 331 | 3.85 | 0.065 | 7.82 | 7.86 | [7.49, 8.54] |
+| detrend `:linear`; expect a slightly higher level | 188 | 2.19 | 0.168 | 7.84 | 7.86 | [7.35, 9.01] |
+| ξ prior Normal(0, 0.1); expect same median, narrower interval | 336 | 3.91 | 0.063 | 7.81 | 7.80 | [7.47, 8.34] |
 
 **Your answer.**
 Which change moved the 100-year level most, and by how much compared with the width of the credible interval?
 
-> *Answer here*
+> *The threshold moved it most. Raising it to 6.0 ft moved the posterior median from 7.84 to 7.95 ft (+0.11), and lowering it to 5.5 ft moved it to 7.72 ft (−0.12). Each is about 11–12% (0.11/1.00 and 0.12/1.00) of the 1.00 ft wide credible interval, and the gap between the two thresholds (0.23 ft) is about a quarter of it.*
+> *Everything else moved the median by 0.04 ft or less. The gap and the detrending barely changed the median, and tightening the $\xi$ prior moved it by −0.04 ft (7.80-7.84).*
+> *But the threshold and the detrending changed the width of the interval much more than the median: its upper end goes from 8.06 ft at 5.5 ft to 8.93 ft at 6.0 ft, and to 9.01 ft with `:linear`.*
 
 **Your answer.**
 Suppose every assumption behind the peaks-over-threshold model holds exactly: the storms are independent, they arrive as a Poisson process, and their excesses follow a GPD above every threshold you tried.
@@ -527,7 +643,17 @@ Under those assumptions, should the 100-year level change when you change each o
 
 State whether your table agrees empirically, and speculate why any differences might persist.
 
-> *Answer here*
+> *Threshold: no. A GPD above 5.5 ft is also a GPD above 6.0 ft with the same ξ, and the smaller λ cancels out the higher threshold. Only the interval should widen, since there are fewer storms.*
+
+> *Gap: no. Independent storms are already separate events, so the gap shouldn't change which peaks count.*
+
+> *Prior: hardly. Hundreds of storms outweigh a weak prior, except in the far tail.*
+
+> *Detrending: yes, it can. It changes the data itself, not a model assumption.*
+
+> *The table agrees for the gap (+0.01, +0.02 ft) and the prior (−0.04 ft), but not for the threshold: between 5.5 and 6.0 ft, ξ rises from −0.05 to 0.14 and the median from 7.72 to 7.95 ft. My guess is that at lower thresholds many peaks are just high tides, whose bounded tail pulls ξ down.*
+
+> *`:linear` barely moved the median but cut the storms from 336 to 188, since its levels are about 0.2 ft lower (base threshold 4.99 vs 5.19 ft). So it acts mostly like a higher threshold.*
 
 
 ## Reporting a design value
@@ -536,7 +662,11 @@ State whether your table agrees empirically, and speculate why any differences m
 Report one 100-year water level for your gauge, with an interval, as you would in a report a city will act on.
 List the choices it depends on and say which one you are least sure of.
 
-> *Answer here*
+> *I would report a 100-year water level of 7.84 ft at Fort Pulaski, with a 95% interval of 7.49 to 8.49 ft. That's from the Bayesian GPD fit, at today's sea level.*
+
+> *The number rests on the `:msl` detrending, the 72-hour gap, the 5.8 ft threshold, the weak priors, and treating λ as fixed. The threshold is the one I trust least, since moving it between 5.5 and 6.0 ft shifted the median by 0.23 ft and the upper end by almost 0.9 ft.*
+
+> *I'd also tell the city that this leaves out future sea level rise, and that the two biggest storms in the record are above the fitted band, so the upper end is probably the safer number to design for.*
 
 
 ## Turning it in
